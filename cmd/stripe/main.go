@@ -36,10 +36,10 @@ type createCustomerEvent struct {
 	PK               string `dynamodbav:"PK"`
 	SK               string `dynamodbav:"SK"`
 	StripeCustomerID string `dynamodbav:"StripeCustomerID"`
-	CognitoUserID    string `json:"cognitoUserID"`
-	FirstName        string `json:"firstName     dynamodbav:FirstName"`
-	SurName          string `json:"surName       dynamodbav:SurName"`
-	EmailAddress     string `json:"emailAddress  dynamodbav:EmailAddress"`
+	CognitoUserID    string `json:"cognitoUserID" dynamodbav:"-"`
+	FirstName        string `json:"firstName      dynamodbav:FirstName"`
+	SurName          string `json:"surName        dynamodbav:SurName"`
+	EmailAddress     string `json:"emailAddress   dynamodbav:EmailAddress"`
 }
 
 type resultStripe struct {
@@ -82,6 +82,7 @@ func handler(sqsEvent events.SQSEvent) error {
 	for _, message := range sqsEvent.Records {
 		go onboardCustomer(wg, chanStripe, message, stripeClient.Customers, db)
 	}
+	wg.Wait()
 	tableName := os.Getenv("DYNAMODB_TABLE_NAME")
 	inputs := []*dynamodb.BatchWriteItemInput{}
 	input := &dynamodb.BatchWriteItemInput{
@@ -120,6 +121,7 @@ func handler(sqsEvent events.SQSEvent) error {
 	for _, input := range inputs {
 		go batchWriteItems(ctx, db, wg, chanDynamodb, input)
 	}
+	wg.Wait()
 	for ch := range chanDynamodb {
 		if ch.Error != nil {
 			log.Error(ch.Error)

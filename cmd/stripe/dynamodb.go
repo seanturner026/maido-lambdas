@@ -10,18 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func generateBatchWriteItemInput(tableName string, writeRequest types.WriteRequest) *dynamodb.BatchWriteItemInput {
-	input := &dynamodb.BatchWriteItemInput{
-		RequestItems: map[string][]types.WriteRequest{
-			tableName: {},
-		},
-	}
-	input.RequestItems[tableName] = append(input.RequestItems[tableName], writeRequest)
-	return input
-}
-
 func generatePutRequestInput(item createCustomerEvent) (map[string]types.AttributeValue, error) {
-	item.SK = fmt.Sprintf("USER#%s", item.CognitoUserID)
+	item.PK = fmt.Sprintf("USER#%s", item.CognitoUserID)
 	item.SK = "USER#MAIDO"
 	putItemInput, err := attributevalue.MarshalMap(item)
 	if err != nil {

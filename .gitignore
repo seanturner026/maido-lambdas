@@ -1,5 +1,6 @@
 .DS_Store
 .env 
+deploy.sh
 
 # Binaries for programs and plugins
 *.exe
