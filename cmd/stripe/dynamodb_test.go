@@ -62,7 +62,11 @@ type mockBatchWriteItem struct {
 	Response *dynamodb.BatchWriteItemOutput
 }
 
-func (m mockBatchWriteItem) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error) {
+func (m mockBatchWriteItem) BatchWriteItem(
+	ctx context.Context,
+	params *dynamodb.BatchWriteItemInput,
+	optFns ...func(*dynamodb.Options),
+) (*dynamodb.BatchWriteItemOutput, error) {
 	return m.Response, nil
 }
 
@@ -162,7 +166,7 @@ func Test_batchWriteItems(t *testing.T) {
 	wg.Add(len(tests))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			batchWriteItems(tt.args.ctx, tt.args.mock, tt.args.wg, tt.args.ch, tt.args.input, tt.args.mockTableName)
+			batchWriteItems(tt.args.ctx, tt.args.wg, tt.args.ch, tt.args.mock, tt.args.input, tt.args.mockTableName)
 		})
 		if len(tt.args.ch) > 0 {
 			for x := range tt.args.ch {

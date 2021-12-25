@@ -22,10 +22,21 @@ func generatePutRequestInput(item createCustomerEvent) (map[string]types.Attribu
 }
 
 type awsDynamoDBAPI interface {
-	BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
+	BatchWriteItem(
+		ctx context.Context,
+		params *dynamodb.BatchWriteItemInput,
+		optFns ...func(*dynamodb.Options),
+	) (*dynamodb.BatchWriteItemOutput, error)
 }
 
-func batchWriteItems(ctx context.Context, db awsDynamoDBAPI, wg *sync.WaitGroup, ch chan resultDB, input *dynamodb.BatchWriteItemInput, tableName string) {
+func batchWriteItems(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	ch chan resultDB,
+	db awsDynamoDBAPI,
+	input *dynamodb.BatchWriteItemInput,
+	tableName string,
+) {
 	defer wg.Done()
 	resp, err := db.BatchWriteItem(ctx, input)
 	if err != nil {
