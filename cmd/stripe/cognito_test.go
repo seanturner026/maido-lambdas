@@ -27,7 +27,7 @@ func Test_writeStripeIDUserAttribute(t *testing.T) {
 		ctx        context.Context
 		wg         *sync.WaitGroup
 		ch         chan resultCognito
-		mock       awsCognitoIdentityProviderAPI
+		cognito    awsCognitoIdentityProviderAPI
 		userPoolID string
 		event      createCustomerEvent
 	}
@@ -41,7 +41,7 @@ func Test_writeStripeIDUserAttribute(t *testing.T) {
 				ctx: ctx,
 				wg:  wg,
 				ch:  make(chan resultCognito),
-				mock: &mockAdminUpdateUserAttributes{
+				cognito: &mockAdminUpdateUserAttributes{
 					Response: &cognitoidentityprovider.AdminUpdateUserAttributesOutput{},
 				},
 				userPoolID: "example_user_pool_id",
@@ -60,7 +60,7 @@ func Test_writeStripeIDUserAttribute(t *testing.T) {
 	wg.Add(len(tests))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			writeStripeIDUserAttribute(tt.args.ctx, tt.args.wg, tt.args.ch, tt.args.mock, tt.args.userPoolID, tt.args.event)
+			writeStripeIDUserAttribute(tt.args.ctx, tt.args.wg, tt.args.ch, tt.args.cognito, tt.args.userPoolID, tt.args.event)
 		})
 	}
 	wg.Wait()

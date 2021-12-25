@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	log "github.com/sirupsen/logrus"
 	"github.com/stripe/stripe-go/v72/client"
 )
@@ -20,6 +23,7 @@ import (
 var (
 	cognito      *cognitoidentityprovider.Client
 	db           *dynamodb.Client
+	queue        *sqs.Client
 	stripeClient *client.API
 )
 
@@ -33,35 +37,11 @@ func init() {
 	}
 	db = dynamodb.NewFromConfig(cfg)
 	cognito = cognitoidentityprovider.NewFromConfig(cfg)
+	queue = sqs.NewFromConfig(cfg)
 }
 
 type items struct {
 	Items []createCustomerEvent
-}
-
-type createCustomerEvent struct {
-	PK               string `dynamodbav:"PK"`
-	SK               string `dynamodbav:"SK"`
-	StripeCustomerID string `dynamodbav:"StripeCustomerID"`
-	CognitoUserID    string `dynamodbav:"-"                json:"cognitoUserID"`
-	FirstName        string `dynamodbav:"FirstName"        json:"firstName"`
-	SurName          string `dynamodbav:"SurName"          json:"surName"`
-	EmailAddress     string `dynamodbav:"EmailAddress"     json:"email"`
-}
-
-type resultStripe struct {
-	Message         string
-	Event           createCustomerEvent
-	PutRequestInput map[string]types.AttributeValue
-	Error           error
-}
-
-type resultDB struct {
-	Error error
-}
-
-type resultCognito struct {
-	Error error
 }
 
 func onboardCustomer(wg *sync.WaitGroup, ch chan resultStripe, apiStripe stripeCustomerCreateAPI, event events.SQSMessage) {
@@ -69,7 +49,7 @@ func onboardCustomer(wg *sync.WaitGroup, ch chan resultStripe, apiStripe stripeC
 	item := &createCustomerEvent{}
 	err := json.Unmarshal([]byte(event.Body), item)
 	if err != nil {
-		ch <- resultStripe{Message: fmt.Sprintf("Unable to create unmarshall event %s", event.MessageId), Error: err}
+		ch <- resultStripe{Message: fmt.Sprintf("Unable to unmarshal event ID %s", event.MessageId), Error: err}
 	}
 	stripeCustomerID, err := createCustomer(apiStripe, item.EmailAddress, fmt.Sprintf("%s %s", item.FirstName, item.SurName))
 	if err != nil {
@@ -77,12 +57,12 @@ func onboardCustomer(wg *sync.WaitGroup, ch chan resultStripe, apiStripe stripeC
 		return
 	}
 	item.StripeCustomerID = stripeCustomerID
+	log.WithFields(log.Fields{"cognito_user_id": item.CognitoUserID, "stripe_customer_id": stripeCustomerID}).Info("Created stripe customer ID")
 	putRequestInput, err := generatePutRequestInput(*item)
 	if err != nil {
 		ch <- resultStripe{
 			Message: fmt.Sprintf(
-				"Unable to generate DynamoDB input -- item %s cognitoUserID %s stripeCustomerID %s",
-				event.MessageId,
+				"Unable to generate DynamoDB input for cognitoUserID %s stripeCustomerID %s",
 				item.CognitoUserID,
 				stripeCustomerID,
 			),
@@ -90,10 +70,13 @@ func onboardCustomer(wg *sync.WaitGroup, ch chan resultStripe, apiStripe stripeC
 		}
 		return
 	}
+	item.SQSMessageID = event.MessageId
+	item.SQSReceiptHandle = event.ReceiptHandle
 	ch <- resultStripe{PutRequestInput: putRequestInput, Event: *item}
 }
 
-func handler(event events.SQSEvent) error {
+func handler(ctx context.Context, event events.SQSEvent) error {
+	log.Info(fmt.Sprintf("Handling %v events", len(event.Records)))
 	wg := &sync.WaitGroup{}
 	requestCount := len(event.Records)
 	wg.Add(requestCount)
@@ -124,12 +107,10 @@ func handler(event events.SQSEvent) error {
 		items.Items = append(items.Items, res.Event)
 		if (i+1)%25 == 0 || i+1 == requestCount {
 			inputs = append(inputs, input)
-			if (i+1)%25 == 0 {
-				input = &dynamodb.BatchWriteItemInput{
-					RequestItems: map[string][]types.WriteRequest{
-						tableName: {},
-					},
-				}
+			input = &dynamodb.BatchWriteItemInput{
+				RequestItems: map[string][]types.WriteRequest{
+					tableName: {},
+				},
 			}
 		}
 		putItemRequest := types.WriteRequest{
@@ -149,7 +130,6 @@ func handler(event events.SQSEvent) error {
 		log.Error("Environment variable USER_POOL_ID is not set")
 		return nil
 	}
-	ctx := context.TODO()
 	for _, input := range inputs {
 		go batchWriteItems(ctx, wg, chanDynamoDB, db, input, tableName)
 	}
@@ -161,12 +141,44 @@ func handler(event events.SQSEvent) error {
 	close(chanCognito)
 	for ch := range chanDynamoDB {
 		if ch.Error != nil {
-			log.Error(ch.Error)
+			log.WithFields(log.Fields{"cognito_user_ids": ch.UserIDS, "error": ch.Error}).Error(ch.Message)
 		}
 	}
 	for ch := range chanCognito {
 		if ch.Error != nil {
-			log.Error(ch.Error)
+			log.WithFields(log.Fields{"cognito_user_id": ch.UserID, "error": ch.Error}).Error(ch.Message)
+		}
+	}
+	requestCount = int(math.Ceil(float64(len(items.Items)) / 10))
+	queueURL, ok := os.LookupEnv("SQS_QUERY_URL")
+	if !ok {
+		log.Error("Environment variable SQS_QUERY_URL is not set")
+		return nil
+	}
+	sqsBatchInputs := []*sqs.DeleteMessageBatchInput{}
+	sqsBatchInput := &sqs.DeleteMessageBatchInput{
+		QueueUrl: aws.String(queueURL),
+	}
+	for i, item := range items.Items {
+		if (i+1)%10 == 0 || i+1 == requestCount {
+			sqsBatchInputs = append(sqsBatchInputs, sqsBatchInput)
+			sqsBatchInput = &sqs.DeleteMessageBatchInput{
+				QueueUrl: aws.String(queueURL),
+			}
+		}
+		itemInputEntry := generateDeleteMessageBatchRequestEntry(item.SQSMessageID, item.SQSReceiptHandle)
+		sqsBatchInput.Entries = append(sqsBatchInput.Entries, itemInputEntry)
+	}
+	wg.Add(requestCount)
+	chanSQS := make(chan resultSQS, requestCount)
+	for _, batch := range sqsBatchInputs {
+		go batchDeleteMessages(ctx, wg, chanSQS, queue, batch)
+	}
+	wg.Wait()
+	close(chanSQS)
+	for ch := range chanSQS {
+		if ch.Error != nil {
+			log.WithFields(log.Fields{"failed_delete_messages": ch.FailedDeleteMessages, "error": ch.Error}).Error(ch.Message)
 		}
 	}
 	return nil

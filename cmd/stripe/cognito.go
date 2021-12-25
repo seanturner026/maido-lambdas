@@ -9,6 +9,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider/types"
 )
 
+type resultCognito struct {
+	Message string
+	UserID  string
+	Error   error
+}
+
 type awsCognitoIdentityProviderAPI interface {
 	AdminUpdateUserAttributes(
 		ctx context.Context,
@@ -36,6 +42,6 @@ func writeStripeIDUserAttribute(
 	}
 	_, err := cognito.AdminUpdateUserAttributes(ctx, input)
 	if err != nil {
-		ch <- resultCognito{Error: err}
+		ch <- resultCognito{Error: err, UserID: event.CognitoUserID, Message: "Unable to add user attribute"}
 	}
 }

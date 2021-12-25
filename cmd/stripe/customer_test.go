@@ -16,7 +16,7 @@ func (m mockStripeCustomer) New(params *stripe.CustomerParams) (*stripe.Customer
 
 func Test_createCustomer(t *testing.T) {
 	type args struct {
-		mock          mockStripeCustomer
+		api           mockStripeCustomer
 		customerEmail string
 		customerName  string
 	}
@@ -29,7 +29,7 @@ func Test_createCustomer(t *testing.T) {
 		{
 			name: "",
 			args: args{
-				mock: mockStripeCustomer{
+				api: mockStripeCustomer{
 					Response: &stripe.Customer{
 						ID: "01234567890",
 					},
@@ -43,7 +43,7 @@ func Test_createCustomer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := createCustomer(tt.args.mock, tt.args.customerEmail, tt.args.customerName)
+			got, err := createCustomer(tt.args.api, tt.args.customerEmail, tt.args.customerName)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("createCustomer() error = %v, wantErr %v", err, tt.wantErr)
 				return

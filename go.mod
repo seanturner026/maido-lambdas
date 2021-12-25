@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.11.1
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.4.5
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.11.0
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.14.0
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stripe/stripe-go/v72 v72.79.0
 )
