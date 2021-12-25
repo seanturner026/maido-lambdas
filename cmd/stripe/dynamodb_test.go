@@ -67,6 +67,7 @@ func (m mockBatchWriteItem) BatchWriteItem(ctx context.Context, params *dynamodb
 }
 
 func Test_batchWriteItems(t *testing.T) {
+	mockTableName := "mockTable"
 	writeRequestInput := types.WriteRequest{
 		PutRequest: &types.PutRequest{
 			Item: map[string]types.AttributeValue{
@@ -86,11 +87,12 @@ func Test_batchWriteItems(t *testing.T) {
 	wg := &sync.WaitGroup{}
 	ctx := context.TODO()
 	type args struct {
-		ctx   context.Context
-		mock  awsDynamoDBAPI
-		wg    *sync.WaitGroup
-		ch    chan resultDB
-		input *dynamodb.BatchWriteItemInput
+		ctx           context.Context
+		mock          awsDynamoDBAPI
+		wg            *sync.WaitGroup
+		ch            chan resultDB
+		input         *dynamodb.BatchWriteItemInput
+		mockTableName string
 	}
 
 	tests := []struct {
@@ -100,51 +102,67 @@ func Test_batchWriteItems(t *testing.T) {
 		{
 			name: "1_item",
 			args: args{
-				ctx:  ctx,
-				mock: mockBatchWriteItem{},
-				wg:   wg,
-				ch:   make(chan resultDB),
+				ctx: ctx,
+				mock: mockBatchWriteItem{
+					Response: &dynamodb.BatchWriteItemOutput{},
+				},
+				wg: wg,
+				ch: make(chan resultDB),
 				input: &dynamodb.BatchWriteItemInput{
 					RequestItems: map[string][]types.WriteRequest{
-						"mockTable": {writeRequestInput},
+						mockTableName: {writeRequestInput},
 					},
 				},
+				mockTableName: mockTableName,
 			},
 		},
 		{
 			name: "2_items",
 			args: args{
-				ctx:  ctx,
-				mock: mockBatchWriteItem{},
-				wg:   wg,
-				ch:   make(chan resultDB),
+				ctx: ctx,
+				mock: mockBatchWriteItem{
+					Response: &dynamodb.BatchWriteItemOutput{},
+				},
+				wg: wg,
+				ch: make(chan resultDB),
 				input: &dynamodb.BatchWriteItemInput{
 					RequestItems: map[string][]types.WriteRequest{
-						"mockTable": {writeRequestInput, writeRequestInput},
+						mockTableName: {writeRequestInput, writeRequestInput},
 					},
 				},
+				mockTableName: mockTableName,
 			},
 		},
 		{
 			// not working
 			name: "26_items",
 			args: args{
-				ctx:  ctx,
-				mock: mockBatchWriteItem{},
-				wg:   wg,
-				ch:   make(chan resultDB),
+				ctx: ctx,
+				mock: mockBatchWriteItem{
+					Response: &dynamodb.BatchWriteItemOutput{},
+				},
+				// Response: &dynamodb.BatchWriteItemOutput{
+				// 	UnprocessedItems: map[string][]types.WriteRequest{
+				// 		mockTableName: {
+				// 			writeRequestInput,
+				// 		},
+				// 	},
+				// },
+				wg: wg,
+				ch: make(chan resultDB),
 				input: &dynamodb.BatchWriteItemInput{
 					RequestItems: map[string][]types.WriteRequest{
-						"mockTable": writeRequestInput26Times,
+						mockTableName: writeRequestInput26Times,
 					},
 				},
+				mockTableName: mockTableName,
 			},
 		},
 	}
 	wg.Add(len(tests))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			batchWriteItems(tt.args.ctx, tt.args.mock, tt.args.wg, tt.args.ch, tt.args.input)
+			batchWriteItems(tt.args.ctx, tt.args.mock, tt.args.wg, tt.args.ch, tt.args.input, tt.args.mockTableName)
 		})
 		if len(tt.args.ch) > 0 {
 			for x := range tt.args.ch {

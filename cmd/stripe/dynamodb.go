@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -24,10 +25,29 @@ type awsDynamoDBAPI interface {
 	BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
 }
 
-func batchWriteItems(ctx context.Context, db awsDynamoDBAPI, wg *sync.WaitGroup, ch chan resultDB, input *dynamodb.BatchWriteItemInput) {
+func batchWriteItems(ctx context.Context, db awsDynamoDBAPI, wg *sync.WaitGroup, ch chan resultDB, input *dynamodb.BatchWriteItemInput, tableName string) {
 	defer wg.Done()
-	_, err := db.BatchWriteItem(ctx, input)
+	resp, err := db.BatchWriteItem(ctx, input)
 	if err != nil {
 		ch <- resultDB{Error: err}
+		return
+	}
+
+	_, ok := resp.UnprocessedItems[tableName]
+	if ok {
+		for {
+			log.Print("Unprocessed items remain. Processing...")
+			input = &dynamodb.BatchWriteItemInput{
+				RequestItems: resp.UnprocessedItems,
+			}
+			resp, err = db.BatchWriteItem(context.TODO(), input)
+			if err != nil {
+				ch <- resultDB{Error: err}
+				return
+			}
+			if resp.UnprocessedItems == nil {
+				break
+			}
+		}
 	}
 }

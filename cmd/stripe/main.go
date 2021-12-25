@@ -119,7 +119,7 @@ func handler(sqsEvent events.SQSEvent) error {
 	ctx := context.TODO()
 	chanDynamodb := make(chan resultDB, requestCount)
 	for _, input := range inputs {
-		go batchWriteItems(ctx, db, wg, chanDynamodb, input)
+		go batchWriteItems(ctx, db, wg, chanDynamodb, input, tableName)
 	}
 	wg.Wait()
 	for ch := range chanDynamodb {
