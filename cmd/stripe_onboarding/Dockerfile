@@ -9,7 +9,7 @@ RUN go mod download
 
 ADD . .
 
-RUN go build -o /main ./cmd/stripe/*.go
+RUN go build -o /main ./cmd/stripe_onboarding/*.go
 
 # lambda
 FROM public.ecr.aws/lambda/provided:al2

@@ -99,13 +99,20 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 	}
 	i := 0
 	items := &items{}
+	// TODO: Test 25 items
 	for res := range chanStripe {
 		if res.Error != nil {
 			log.WithFields(log.Fields{"error": res.Error}).Error(res.Message)
 			break
 		}
 		items.Items = append(items.Items, res.Event)
-		if (i+1)%25 == 0 || i+1 == requestCount {
+		putItemRequest := types.WriteRequest{
+			PutRequest: &types.PutRequest{
+				Item: res.PutRequestInput,
+			},
+		}
+		input.RequestItems[tableName] = append(input.RequestItems[tableName], putItemRequest)
+		if i%24 == 0 || i == requestCount {
 			inputs = append(inputs, input)
 			input = &dynamodb.BatchWriteItemInput{
 				RequestItems: map[string][]types.WriteRequest{
@@ -113,12 +120,6 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 				},
 			}
 		}
-		putItemRequest := types.WriteRequest{
-			PutRequest: &types.PutRequest{
-				Item: res.PutRequestInput,
-			},
-		}
-		input.RequestItems[tableName] = append(input.RequestItems[tableName], putItemRequest)
 		i++
 	}
 	requestCount = len(inputs) + len(items.Items)
@@ -150,9 +151,9 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 		}
 	}
 	requestCount = int(math.Ceil(float64(len(items.Items)) / 10))
-	queueURL, ok := os.LookupEnv("SQS_QUERY_URL")
+	queueURL, ok := os.LookupEnv("SQS_QUEUE_URL")
 	if !ok {
-		log.Error("Environment variable SQS_QUERY_URL is not set")
+		log.Error("Environment variable SQS_QUEUE_URL is not set")
 		return nil
 	}
 	sqsBatchInputs := []*sqs.DeleteMessageBatchInput{}
@@ -160,14 +161,14 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 		QueueUrl: aws.String(queueURL),
 	}
 	for i, item := range items.Items {
-		if (i+1)%10 == 0 || i+1 == requestCount {
+		itemInputEntry := generateDeleteMessageBatchRequestEntry(item.SQSMessageID, item.SQSReceiptHandle)
+		sqsBatchInput.Entries = append(sqsBatchInput.Entries, itemInputEntry)
+		if i%9 == 0 || i == requestCount {
 			sqsBatchInputs = append(sqsBatchInputs, sqsBatchInput)
 			sqsBatchInput = &sqs.DeleteMessageBatchInput{
 				QueueUrl: aws.String(queueURL),
 			}
 		}
-		itemInputEntry := generateDeleteMessageBatchRequestEntry(item.SQSMessageID, item.SQSReceiptHandle)
-		sqsBatchInput.Entries = append(sqsBatchInput.Entries, itemInputEntry)
 	}
 	wg.Add(requestCount)
 	chanSQS := make(chan resultSQS, requestCount)
