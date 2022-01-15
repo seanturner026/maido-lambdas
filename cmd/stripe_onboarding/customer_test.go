@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stripe/stripe-go/v72"
@@ -12,6 +13,45 @@ type mockStripeCustomer struct {
 
 func (m mockStripeCustomer) New(params *stripe.CustomerParams) (*stripe.Customer, error) {
 	return m.Response, nil
+}
+
+func Test_createCustomers(t *testing.T) {
+	wg := &sync.WaitGroup{}
+	type args struct {
+		wg        *sync.WaitGroup
+		ch        chan resultStripe
+		apiStripe stripeCustomerCreateAPI
+		event     *createCustomerEvent
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "",
+			args: args{
+				wg: wg,
+				ch: make(chan resultStripe),
+				apiStripe: mockStripeCustomer{
+					Response: &stripe.Customer{
+						ID: "01234567890",
+					},
+				},
+				event: &createCustomerEvent{
+					CognitoUserID: "01234567890",
+					FirstName:     "first",
+					SurName:       "last",
+					EmailAddress:  "example@example.com",
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			go createCustomers(tt.args.wg, tt.args.ch, tt.args.apiStripe, tt.args.event)
+		})
+	}
+	wg.Wait()
 }
 
 func Test_createCustomer(t *testing.T) {

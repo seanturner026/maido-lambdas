@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 
@@ -49,7 +50,6 @@ func Test_writeStripeIDUserAttribute(t *testing.T) {
 					PK:               "",
 					SK:               "",
 					StripeCustomerID: "01234",
-					CognitoUserID:    "56789",
 					FirstName:        "first_example",
 					SurName:          "sur_example",
 					EmailAddress:     "example@example.com",
@@ -57,10 +57,11 @@ func Test_writeStripeIDUserAttribute(t *testing.T) {
 			},
 		},
 	}
+	_ = os.Setenv("USER_POOL_ID", "example")
 	wg.Add(len(tests))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			writeStripeIDUserAttribute(tt.args.ctx, tt.args.wg, tt.args.ch, tt.args.cognito, tt.args.userPoolID, tt.args.event)
+			writeStripeIDUserAttribute(tt.args.ctx, tt.args.wg, tt.args.ch, tt.args.cognito, tt.args.event)
 		})
 	}
 	wg.Wait()

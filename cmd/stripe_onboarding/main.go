@@ -10,11 +10,9 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	log "github.com/sirupsen/logrus"
 	"github.com/stripe/stripe-go/v72/client"
@@ -44,98 +42,48 @@ type items struct {
 	Items []createCustomerEvent
 }
 
-func onboardCustomer(wg *sync.WaitGroup, ch chan resultStripe, apiStripe stripeCustomerCreateAPI, event events.SQSMessage) {
-	defer wg.Done()
-	item := &createCustomerEvent{}
-	err := json.Unmarshal([]byte(event.Body), item)
-	if err != nil {
-		ch <- resultStripe{Message: fmt.Sprintf("Unable to unmarshal event ID %s", event.MessageId), Error: err}
-	}
-	stripeCustomerID, err := createCustomer(apiStripe, item.EmailAddress, fmt.Sprintf("%s %s", item.FirstName, item.SurName))
-	if err != nil {
-		ch <- resultStripe{Message: fmt.Sprintf("Unable to create Customer for Cognito User ID %s", item.CognitoUserID), Error: err}
-		return
-	}
-	item.StripeCustomerID = stripeCustomerID
-	log.WithFields(log.Fields{"cognito_user_id": item.CognitoUserID, "stripe_customer_id": stripeCustomerID}).Info("Created stripe customer ID")
-	putRequestInput, err := generatePutRequestInput(*item)
-	if err != nil {
-		ch <- resultStripe{
-			Message: fmt.Sprintf(
-				"Unable to generate DynamoDB input for cognitoUserID %s stripeCustomerID %s",
-				item.CognitoUserID,
-				stripeCustomerID,
-			),
-			Error: err,
+func unmarshalCreateCustomerEvents(event events.SQSEvent) ([]*createCustomerEvent, error) {
+	events := []*createCustomerEvent{}
+	for _, record := range event.Records {
+		item := &createCustomerEvent{}
+		err := json.Unmarshal([]byte(record.Body), item)
+		if err != nil {
+			return events, fmt.Errorf("unable to unmarshal event ID %s", record.MessageId)
 		}
-		return
+		item.SQSMessageID = record.MessageId
+		item.SQSReceiptHandle = record.ReceiptHandle
+		events = append(events, item)
 	}
-	item.SQSMessageID = event.MessageId
-	item.SQSReceiptHandle = event.ReceiptHandle
-	ch <- resultStripe{PutRequestInput: putRequestInput, Event: *item}
+	return events, nil
 }
 
-func handler(ctx context.Context, event events.SQSEvent) error {
-	log.Info(fmt.Sprintf("Handling %v events", len(event.Records)))
-	wg := &sync.WaitGroup{}
+func onboardCustomer(ctx context.Context, event events.SQSEvent) error {
+	customerEvents, err := unmarshalCreateCustomerEvents(event)
+	if err != nil {
+		return err
+	}
 	requestCount := len(event.Records)
+	wg := &sync.WaitGroup{}
 	wg.Add(requestCount)
 	chanStripe := make(chan resultStripe, requestCount)
-	for _, record := range event.Records {
-		go onboardCustomer(wg, chanStripe, stripeClient.Customers, record)
+	for _, customerEvent := range customerEvents {
+		go createCustomers(wg, chanStripe, stripeClient.Customers, customerEvent)
 	}
 	wg.Wait()
 	close(chanStripe)
-	tableName, ok := os.LookupEnv("DYNAMODB_TABLE_NAME")
-	if !ok {
-		log.Error("Environment variable DYNAMODB_TABLE_NAME is not set")
-		return nil
-	}
-	inputs := []*dynamodb.BatchWriteItemInput{}
-	input := &dynamodb.BatchWriteItemInput{
-		RequestItems: map[string][]types.WriteRequest{
-			tableName: {},
-		},
-	}
-	i := 0
-	items := &items{}
-	// TODO: Test 25 items
-	for res := range chanStripe {
-		if res.Error != nil {
-			log.WithFields(log.Fields{"error": res.Error}).Error(res.Message)
-			break
-		}
-		items.Items = append(items.Items, res.Event)
-		putItemRequest := types.WriteRequest{
-			PutRequest: &types.PutRequest{
-				Item: res.PutRequestInput,
-			},
-		}
-		input.RequestItems[tableName] = append(input.RequestItems[tableName], putItemRequest)
-		if i%24 == 0 || i == requestCount {
-			inputs = append(inputs, input)
-			input = &dynamodb.BatchWriteItemInput{
-				RequestItems: map[string][]types.WriteRequest{
-					tableName: {},
-				},
-			}
-		}
-		i++
+	inputs, items, tableName, err := generatePutRequestInputBatches(requestCount, chanStripe)
+	if err != nil {
+		return err
 	}
 	requestCount = len(inputs) + len(items.Items)
 	wg.Add(requestCount)
 	chanDynamoDB := make(chan resultDB, requestCount)
 	chanCognito := make(chan resultCognito, requestCount)
-	userPoolID, ok := os.LookupEnv("USER_POOL_ID")
-	if !ok {
-		log.Error("Environment variable USER_POOL_ID is not set")
-		return nil
-	}
 	for _, input := range inputs {
 		go batchWriteItems(ctx, wg, chanDynamoDB, db, input, tableName)
 	}
 	for _, item := range items.Items {
-		go writeStripeIDUserAttribute(ctx, wg, chanCognito, cognito, userPoolID, item)
+		go writeStripeIDUserAttribute(ctx, wg, chanCognito, cognito, item)
 	}
 	wg.Wait()
 	close(chanDynamoDB)
@@ -151,24 +99,9 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 		}
 	}
 	requestCount = int(math.Ceil(float64(len(items.Items)) / 10))
-	queueURL, ok := os.LookupEnv("SQS_QUEUE_URL")
-	if !ok {
-		log.Error("Environment variable SQS_QUEUE_URL is not set")
-		return nil
-	}
-	sqsBatchInputs := []*sqs.DeleteMessageBatchInput{}
-	sqsBatchInput := &sqs.DeleteMessageBatchInput{
-		QueueUrl: aws.String(queueURL),
-	}
-	for i, item := range items.Items {
-		itemInputEntry := generateDeleteMessageBatchRequestEntry(item.SQSMessageID, item.SQSReceiptHandle)
-		sqsBatchInput.Entries = append(sqsBatchInput.Entries, itemInputEntry)
-		if i%9 == 0 || i == requestCount {
-			sqsBatchInputs = append(sqsBatchInputs, sqsBatchInput)
-			sqsBatchInput = &sqs.DeleteMessageBatchInput{
-				QueueUrl: aws.String(queueURL),
-			}
-		}
+	sqsBatchInputs, err := generateDeleteMessageInputBatches(requestCount, items)
+	if err != nil {
+		return err
 	}
 	wg.Add(requestCount)
 	chanSQS := make(chan resultSQS, requestCount)
@@ -181,6 +114,15 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 		if ch.Error != nil {
 			log.WithFields(log.Fields{"failed_delete_messages": ch.FailedDeleteMessages, "error": ch.Error}).Error(ch.Message)
 		}
+	}
+	return nil
+}
+
+func handler(ctx context.Context, event events.SQSEvent) error {
+	log.Info(fmt.Sprintf("Handling %v events", len(event.Records)))
+	err := onboardCustomer(ctx, event)
+	if err != nil {
+		return err
 	}
 	return nil
 }

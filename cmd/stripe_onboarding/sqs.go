@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -10,6 +12,28 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	log "github.com/sirupsen/logrus"
 )
+
+func generateDeleteMessageInputBatches(requestCount int, items items) ([]*sqs.DeleteMessageBatchInput, error) {
+	queueURL, ok := os.LookupEnv("SQS_QUEUE_URL")
+	if !ok {
+		return []*sqs.DeleteMessageBatchInput{}, fmt.Errorf("environment variable SQS_QUEUE_URL is not set")
+	}
+	sqsBatchInputs := []*sqs.DeleteMessageBatchInput{}
+	sqsBatchInput := &sqs.DeleteMessageBatchInput{
+		QueueUrl: aws.String(queueURL),
+	}
+	for i, item := range items.Items {
+		itemInputEntry := generateDeleteMessageBatchRequestEntry(item.SQSMessageID, item.SQSReceiptHandle)
+		sqsBatchInput.Entries = append(sqsBatchInput.Entries, itemInputEntry)
+		if i%9 == 0 || i == requestCount {
+			sqsBatchInputs = append(sqsBatchInputs, sqsBatchInput)
+			sqsBatchInput = &sqs.DeleteMessageBatchInput{
+				QueueUrl: aws.String(queueURL),
+			}
+		}
+	}
+	return sqsBatchInputs, nil
+}
 
 func generateDeleteMessageBatchRequestEntry(SQSMessageID, SQSReceiptHandle string) types.DeleteMessageBatchRequestEntry {
 	return types.DeleteMessageBatchRequestEntry{

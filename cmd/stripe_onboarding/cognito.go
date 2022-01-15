@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,10 +30,13 @@ func writeStripeIDUserAttribute(
 	wg *sync.WaitGroup,
 	ch chan resultCognito,
 	cognito awsCognitoIdentityProviderAPI,
-	userPoolID string,
 	event createCustomerEvent,
 ) {
 	defer wg.Done()
+	userPoolID, ok := os.LookupEnv("USER_POOL_ID")
+	if !ok {
+		ch <- resultCognito{Error: fmt.Errorf("environment variable USER_POOL_ID is not set"), UserID: event.CognitoUserID, Message: "Unable to add user attribute"}
+	}
 	input := &cognitoidentityprovider.AdminUpdateUserAttributesInput{
 		UserAttributes: []types.AttributeType{{
 			Name:  aws.String("custom:stripe_customer_id"),

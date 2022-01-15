@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -11,6 +12,46 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	log "github.com/sirupsen/logrus"
 )
+
+func generatePutRequestInputBatches(requestCount int, chanStripe chan resultStripe) ([]*dynamodb.BatchWriteItemInput, items, string, error) {
+	tableName, ok := os.LookupEnv("DYNAMODB_TABLE_NAME")
+	if !ok {
+		return []*dynamodb.BatchWriteItemInput{}, items{}, "", fmt.Errorf("environment variable DYNAMODB_TABLE_NAME is not set")
+	}
+	inputs := []*dynamodb.BatchWriteItemInput{}
+	input := &dynamodb.BatchWriteItemInput{
+		RequestItems: map[string][]types.WriteRequest{
+			tableName: {},
+		},
+	}
+	writeRequest := []types.WriteRequest{}
+	i := 1
+	items := &items{}
+	// TODO: Test 25 items
+	for res := range chanStripe {
+		if res.Error != nil {
+			log.WithFields(log.Fields{"error": res.Error}).Error(res.Message)
+			continue // TODO handle better
+		}
+		items.Items = append(items.Items, res.Event)
+		putItemRequest := &types.PutRequest{
+			Item: res.PutRequestInput,
+		}
+		writeRequest = append(writeRequest, types.WriteRequest{PutRequest: putItemRequest})
+		input.RequestItems[tableName] = writeRequest
+		if i%25 == 0 || i == requestCount {
+			inputs = append(inputs, input)
+			input = &dynamodb.BatchWriteItemInput{
+				RequestItems: map[string][]types.WriteRequest{
+					tableName: {},
+				},
+			}
+			writeRequest = []types.WriteRequest{}
+		}
+		i++
+	}
+	return inputs, *items, tableName, nil
+}
 
 func generatePutRequestInput(item createCustomerEvent) (map[string]types.AttributeValue, error) {
 	item.PK = fmt.Sprintf("USER#%s", item.CognitoUserID)
