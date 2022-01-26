@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"os"
 	"reflect"
 	"testing"
 
@@ -65,6 +67,38 @@ func Test_unmarshalCreateCustomerEvents(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("unmarshalCreateCustomerEvents() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_handler(t *testing.T) {
+	type args struct {
+		ctx   context.Context
+		event events.SQSEvent
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "",
+			args: args{
+				ctx: nil,
+				event: events.SQSEvent{
+					Records: []events.SQSMessage{},
+				},
+			},
+			wantErr: false,
+		},
+	}
+	os.Setenv("SQS_QUEUE_URL", "example")
+	os.Setenv("DYNAMODB_TABLE_NAME", "example")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := handler(tt.args.ctx, tt.args.event); (err != nil) != tt.wantErr {
+				t.Errorf("handler() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

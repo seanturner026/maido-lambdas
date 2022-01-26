@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -10,6 +11,83 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
+
+func Test_generateDeleteMessageInputBatches(t *testing.T) {
+	const sqsQueueURL = "example_queue_url"
+	deleteBatchEntry := types.DeleteMessageBatchRequestEntry{
+		Id:            aws.String("12345"),
+		ReceiptHandle: aws.String("67890"),
+	}
+	customerEvent := createCustomerEvent{
+		SQSMessageID:     "12345",
+		SQSReceiptHandle: "67890",
+	}
+	type args struct {
+		requestCount int
+		items        items
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []*sqs.DeleteMessageBatchInput
+		wantErr bool
+	}{
+		{
+			name: "1_item",
+			args: args{
+				requestCount: 1,
+				items: items{
+					Items: []createCustomerEvent{customerEvent},
+				},
+			},
+			want: []*sqs.DeleteMessageBatchInput{{
+				Entries:  []types.DeleteMessageBatchRequestEntry{deleteBatchEntry},
+				QueueUrl: aws.String(sqsQueueURL),
+			}},
+			wantErr: false,
+		},
+		{
+			name: "11_items",
+			args: args{
+				requestCount: 11,
+				items: items{
+					Items: []createCustomerEvent{
+						customerEvent, customerEvent, customerEvent, customerEvent, customerEvent,
+						customerEvent, customerEvent, customerEvent, customerEvent, customerEvent,
+						customerEvent,
+					},
+				},
+			},
+			want: []*sqs.DeleteMessageBatchInput{
+				{
+					Entries: []types.DeleteMessageBatchRequestEntry{
+						deleteBatchEntry, deleteBatchEntry, deleteBatchEntry, deleteBatchEntry, deleteBatchEntry,
+						deleteBatchEntry, deleteBatchEntry, deleteBatchEntry, deleteBatchEntry, deleteBatchEntry,
+					},
+					QueueUrl: aws.String(sqsQueueURL),
+				},
+				{
+					Entries:  []types.DeleteMessageBatchRequestEntry{deleteBatchEntry},
+					QueueUrl: aws.String(sqsQueueURL),
+				},
+			},
+			wantErr: false,
+		},
+	}
+	os.Setenv("SQS_QUEUE_URL", sqsQueueURL)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := generateDeleteMessageInputBatches(tt.args.requestCount, tt.args.items)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("generateDeleteMessageInputBatches() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("generateDeleteMessageInputBatches() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func Test_generateDeleteMessageBatchRequestEntry(t *testing.T) {
 	type args struct {

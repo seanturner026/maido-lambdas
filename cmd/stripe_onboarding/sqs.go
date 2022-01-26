@@ -22,14 +22,17 @@ func generateDeleteMessageInputBatches(requestCount int, items items) ([]*sqs.De
 	sqsBatchInput := &sqs.DeleteMessageBatchInput{
 		QueueUrl: aws.String(queueURL),
 	}
+	entries := []types.DeleteMessageBatchRequestEntry{}
 	for i, item := range items.Items {
 		itemInputEntry := generateDeleteMessageBatchRequestEntry(item.SQSMessageID, item.SQSReceiptHandle)
-		sqsBatchInput.Entries = append(sqsBatchInput.Entries, itemInputEntry)
-		if i%9 == 0 || i == requestCount {
+		entries = append(entries, itemInputEntry)
+		sqsBatchInput.Entries = entries
+		if i != 0 && i%9 == 0 || i == requestCount-1 {
 			sqsBatchInputs = append(sqsBatchInputs, sqsBatchInput)
 			sqsBatchInput = &sqs.DeleteMessageBatchInput{
 				QueueUrl: aws.String(queueURL),
 			}
+			entries = []types.DeleteMessageBatchRequestEntry{}
 		}
 	}
 	return sqsBatchInputs, nil

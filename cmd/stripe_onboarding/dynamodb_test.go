@@ -150,12 +150,27 @@ func Test_generatePutRequestInputBatches(t *testing.T) {
 			want2:   tableName,
 			wantErr: false,
 		},
-	}
-	err := os.Setenv("DYNAMODB_TABLE_NAME", tableName)
-	if err != nil {
-		t.Fatal("error setting DYNAMODB_TABLE_NAME environment variable")
+		{
+			name: "no_environment_variable",
+			args: args{
+				requestCount: 0,
+				chanStripe:   zeroItemsChanStripe,
+			},
+			want:    []*dynamodb.BatchWriteItemInput{},
+			want1:   items{},
+			want2:   "",
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
+		if tt.name == "no_environment_variable" {
+			os.Unsetenv("DYNAMODB_TABLE_NAME")
+		} else {
+			err := os.Setenv("DYNAMODB_TABLE_NAME", tableName)
+			if err != nil {
+				t.Fatal("error setting DYNAMODB_TABLE_NAME environment variable")
+			}
+		}
 		t.Run(tt.name, func(t *testing.T) {
 			got, got1, got2, err := generatePutRequestInputBatches(tt.args.requestCount, tt.args.chanStripe)
 			if (err != nil) != tt.wantErr {

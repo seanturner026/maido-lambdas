@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -9,10 +10,11 @@ import (
 
 type mockStripeCustomer struct {
 	Response *stripe.Customer
+	Error    error
 }
 
 func (m mockStripeCustomer) New(params *stripe.CustomerParams) (*stripe.Customer, error) {
-	return m.Response, nil
+	return m.Response, m.Error
 }
 
 func Test_createCustomers(t *testing.T) {
@@ -73,12 +75,26 @@ func Test_createCustomer(t *testing.T) {
 					Response: &stripe.Customer{
 						ID: "01234567890",
 					},
+					Error: nil,
 				},
 				customerEmail: "foo.bar@gmail.com",
 				customerName:  "Boo Far",
 			},
 			want:    "01234567890",
 			wantErr: false,
+		},
+		{
+			name: "",
+			args: args{
+				api: mockStripeCustomer{
+					Response: nil,
+					Error:    fmt.Errorf("example error"),
+				},
+				customerEmail: "",
+				customerName:  "",
+			},
+			want:    "",
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {

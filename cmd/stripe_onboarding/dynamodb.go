@@ -27,7 +27,6 @@ func generatePutRequestInputBatches(requestCount int, chanStripe chan resultStri
 	writeRequest := []types.WriteRequest{}
 	i := 1
 	items := &items{}
-	// TODO: Test 25 items
 	for res := range chanStripe {
 		if res.Error != nil {
 			log.WithFields(log.Fields{"error": res.Error}).Error(res.Message)
